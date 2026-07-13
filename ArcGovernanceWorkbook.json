@@ -1,0 +1,472 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Azure Arc Governance Dashboard\r\n\r\nThis workbook provides a sample Azure Arc governance view for Arc-enabled servers. It includes Arc connectivity, agent version, automatic upgrade status, Defender for Cloud plan status, Microsoft Defender for Endpoint extension coverage, Azure Policy compliance, Windows licensing/AHB indicators, and Arc-enabled SQL Server license status.\r\n\r\n**Design note:** This version avoids complex joins so it can be used safely as a sample workbook even when Defender for Cloud, MDE, Arc SQL, or AHB are not currently deployed in the environment."
+      },
+      "name": "text - header"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Executive Summary"
+      },
+      "name": "text - executive summary"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines'\r\n| extend\r\n    ArcStatus = tostring(properties.status),\r\n    AutoUpgrade = tostring(properties.agentUpgrade.enableAutomaticUpgrade)\r\n| summarize\r\n    TotalArcServers = count(),\r\n    ConnectedServers = countif(ArcStatus =~ 'Connected'),\r\n    DisconnectedOrUnknown = countif(ArcStatus !~ 'Connected' or isempty(ArcStatus)),\r\n    AutoUpgradeEnabled = countif(AutoUpgrade =~ 'true'),\r\n    AutoUpgradeDisabledOrUnknown = countif(AutoUpgrade !~ 'true' or isempty(AutoUpgrade))\r\n| extend\r\n    ArcConnectionHealth = case(\r\n        DisconnectedOrUnknown == 0 and TotalArcServers > 0, 'Healthy',\r\n        TotalArcServers == 0, 'No Arc Servers Found',\r\n        'Attention Required'\r\n    ),\r\n    AutoUpgradeHealth = case(\r\n        AutoUpgradeDisabledOrUnknown == 0 and TotalArcServers > 0, 'Compliant',\r\n        TotalArcServers == 0, 'No Arc Servers Found',\r\n        'Action Required'\r\n    )",
+        "size": 3,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table"
+      },
+      "name": "Executive Summary - Arc Governance"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 1. Arc Server Inventory\r\n\r\nThis section shows Arc-enabled server connectivity, installed Connected Machine Agent version, and automatic upgrade status. **Auto Upgrade Disabled** is treated as the primary operational risk instead of manually tracking the latest Arc agent version."
+      },
+      "name": "text - arc inventory"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines'\r\n| extend\r\n    ComputerName = name,\r\n    ArcStatus = tostring(properties.status),\r\n    LastConnected = todatetime(properties.lastStatusChange),\r\n    AgentVersion = tostring(properties.agentVersion),\r\n    OSType = tostring(properties.osType),\r\n    OSName = tostring(properties.osName),\r\n    OSSku = tostring(properties.osSku),\r\n    AutoUpgrade = tostring(properties.agentUpgrade.enableAutomaticUpgrade)\r\n\r\n| extend\r\n    ArcConnectionHealth = case(\r\n        ArcStatus =~ 'Connected', 'Connected',\r\n        ArcStatus =~ 'Disconnected', 'Disconnected',\r\n        isempty(ArcStatus), 'Unknown',\r\n        ArcStatus\r\n    )\r\n\r\n| extend\r\n    ArcConnectionIcon = case(\r\n        ArcStatus =~ 'Connected', 'success',\r\n        ArcStatus =~ 'Disconnected', 'critical',\r\n        'warning'\r\n    )\r\n\r\n| extend\r\n    AutoUpgradeHealth = case(\r\n        AutoUpgrade =~ 'true', 'Enabled',\r\n        AutoUpgrade =~ 'false', 'Disabled',\r\n        isempty(AutoUpgrade), 'Not Reported',\r\n        AutoUpgrade\r\n    )\r\n\r\n| extend\r\n    AutoUpgradeIcon = case(\r\n        AutoUpgrade =~ 'true', 'success',\r\n        AutoUpgrade =~ 'false', 'critical',\r\n        'warning'\r\n    )\r\n\r\n| extend\r\n    DefenderForCloudEnabled = 'Not Configured',\r\n    DefenderIcon = 'warning',\r\n    MDEStatus = 'Not Configured',\r\n    MDEIcon = 'warning'\r\n\r\n| project\r\n    ComputerName,\r\n    ArcConnectionIcon,\r\n    ArcConnectionHealth,\r\n    AgentVersion,\r\n    AutoUpgradeIcon,\r\n    AutoUpgradeHealth,\r\n    DefenderIcon,\r\n    DefenderForCloudEnabled,\r\n    MDEIcon,\r\n    MDEStatus,\r\n    OSType,\r\n    OSName,\r\n    OSSku,\r\n    LastConnected,\r\n    ResourceGroup = resourceGroup,\r\n    Location = location,\r\n    SubscriptionId = subscriptionId,\r\n    ResourceId = id\r\n\r\n| order by AutoUpgradeHealth asc, LastConnected desc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ArcConnectionIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "AutoUpgradeIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "DefenderIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "MDEIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "ArcConnectionHealth",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Connected",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disconnected",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Unknown",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "lightBlue",
+                    "text": "{0}{1}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "AutoUpgradeHealth",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Enabled",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disabled",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not Reported",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "text": "{0}{1}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "DefenderForCloudEnabled",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Enabled",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disabled / Free Tier",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not Reported",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "turquoise",
+                    "text": "{0}{1}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sortBy": []
+      },
+      "name": "Arc Server Inventory"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 2. Arc Agent Version Distribution"
+      },
+      "name": "text - agent version distribution"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines'\r\n| extend AgentVersion = tostring(properties.agentVersion)\r\n| extend AgentVersion = iff(isempty(AgentVersion), 'Not Reported', AgentVersion)\r\n| summarize TotalServers = count() by AgentVersion\r\n| order by AgentVersion desc",
+        "size": 2,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "bar"
+      },
+      "name": "Arc Agent Version Distribution"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 3. Auto Upgrade Compliance\r\n\r\nThis is the recommended control for avoiding monthly workbook edits. Servers where Auto Upgrade is disabled or not reported should be reviewed."
+      },
+      "name": "text - auto upgrade"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines'\r\n| extend AutoUpgrade = tostring(properties.agentUpgrade.enableAutomaticUpgrade)\r\n| extend AutoUpgradeStatus = case(\r\n    AutoUpgrade =~ 'true', 'Enabled',\r\n    AutoUpgrade =~ 'false', 'Disabled',\r\n    isempty(AutoUpgrade), 'Not Reported',\r\n    AutoUpgrade\r\n)\r\n| summarize TotalServers = count() by AutoUpgradeStatus\r\n| order by AutoUpgradeStatus asc",
+        "size": 2,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "piechart"
+      },
+      "name": "Auto Upgrade Compliance"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 4. Defender for Cloud Plan Status\r\n\r\nThis section checks whether Defender for Cloud / Defender for Servers appears enabled at the subscription level. This is separate from MDE onboarding."
+      },
+      "name": "text - defender for cloud"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "securityresources\r\n| where type =~ 'microsoft.security/pricings'\r\n| where name =~ 'VirtualMachines'\r\n| extend\r\n    DefenderForServersPricingTier = tostring(properties.pricingTier),\r\n    DefenderForServersSubPlan = tostring(properties.subPlan)\r\n| extend DefenderForCloudEnabled = case(\r\n    DefenderForServersPricingTier =~ 'Standard', 'Enabled',\r\n    DefenderForServersPricingTier =~ 'Free', 'Disabled / Free Tier',\r\n    isempty(DefenderForServersPricingTier), 'Not Reported',\r\n    DefenderForServersPricingTier\r\n)\r\n| extend DefenderForCloudIcon = case(\r\n    DefenderForCloudEnabled =~ 'Enabled', 'success',\r\n    DefenderForCloudEnabled =~ 'Disabled / Free Tier', 'critical',\r\n    DefenderForCloudEnabled =~ 'Not Reported', 'warning',\r\n    'warning'\r\n)\r\n| project\r\n    DefenderForCloudIcon,\r\n    SubscriptionId = subscriptionId,\r\n    DefenderForCloudEnabled,\r\n    DefenderForServersPricingTier,\r\n    DefenderForServersSubPlan,\r\n    ResourceId = id\r\n| order by SubscriptionId asc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "DefenderForCloudIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "DefenderForCloudEnabled",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Enabled",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disabled / Free Tier",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not Reported",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "turquoise",
+                    "text": "{0}{1}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "name": "Defender for Cloud Plan Status"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 5. Microsoft Defender for Endpoint Extension Coverage\r\n\r\nThis section checks for the Arc MDE extensions by name. If your sample environment does not have MDE deployed, this should still return a summary with `0` MDE extensions."
+      },
+      "name": "text - mde coverage"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines/extensions'\r\n| extend IsMDEExtension = name in~ ('MDE.Windows', 'MDE.Linux')\r\n| summarize\r\n    TotalArcExtensions = count(),\r\n    MDEExtensions = countif(IsMDEExtension),\r\n    NonMDEExtensions = countif(IsMDEExtension == false)\r\n| extend MDECoverageStatus = case(\r\n    MDEExtensions > 0, 'MDE Extension Found',\r\n    MDEExtensions == 0, 'MDE Extension Not Found',\r\n    'Unknown'\r\n)\r\n| extend MDEIcon = case(\r\n    MDEExtensions > 0, 'success',\r\n    MDEExtensions == 0, 'warning',\r\n    'warning'\r\n)\r\n| project\r\n    MDEIcon,\r\n    MDECoverageStatus,\r\n    TotalArcExtensions,\r\n    MDEExtensions,\r\n    NonMDEExtensions",
+        "size": 3,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "MDEIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "MDECoverageStatus",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "MDE Extension Found",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "MDE Extension Not Found",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Unknown",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "text": "{0}{1}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "name": "MDE Extension Coverage Summary"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines/extensions'\r\n| extend ExtensionCategory = case(\r\n    name in~ ('MDE.Windows', 'MDE.Linux'), 'MDE',\r\n    'Other Arc Extension'\r\n)\r\n| summarize Count = count() by ExtensionName = name, ExtensionCategory\r\n| order by ExtensionCategory asc, Count desc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table"
+      },
+      "name": "Arc Extension Inventory"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 6. Azure Policy Compliance for Arc Servers\r\n\r\nThis section summarizes Azure Policy compliance states for Arc-enabled servers where policy data is available in Azure Resource Graph."
+      },
+      "name": "text - policy compliance"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\r\n| where type =~ 'microsoft.policyinsights/policystates'\r\n| extend\r\n    ResourceId = tostring(properties.resourceId),\r\n    ComplianceState = tostring(properties.complianceState),\r\n    PolicyAssignmentName = tostring(properties.policyAssignmentName),\r\n    PolicyDefinitionName = tostring(properties.policyDefinitionName),\r\n    Timestamp = todatetime(properties.timestamp)\r\n\r\n| where ResourceId has '/providers/Microsoft.HybridCompute/machines/'\r\n\r\n| summarize\r\n    TotalEvaluatedResources = count(),\r\n    Compliant = countif(ComplianceState =~ 'Compliant'),\r\n    NonCompliant = countif(ComplianceState =~ 'NonCompliant'),\r\n    Exempt = countif(ComplianceState =~ 'Exempt'),\r\n    Conflict = countif(ComplianceState =~ 'Conflict'),\r\n    LastEvaluation = max(Timestamp)\r\n    by PolicyAssignmentName, PolicyDefinitionName\r\n\r\n| extend ComplianceHealth = case(\r\n    NonCompliant > 0, 'Non-Compliant Resources Found',\r\n    Compliant > 0 and NonCompliant == 0, 'Compliant',\r\n    'Unknown'\r\n)\r\n\r\n| extend PolicyIcon = case(\r\n    NonCompliant > 0, 'critical',\r\n    Compliant > 0 and NonCompliant == 0, 'success',\r\n    'warning'\r\n)\r\n\r\n| project\r\n    PolicyIcon,\r\n    ComplianceHealth,\r\n    PolicyAssignmentName,\r\n    PolicyDefinitionName,\r\n    TotalEvaluatedResources,\r\n    Compliant,\r\n    NonCompliant,\r\n    Exempt,\r\n    Conflict,\r\n    LastEvaluation\r\n\r\n| order by NonCompliant desc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "PolicyIcon",
+              "formatter": 11
+            }
+          ]
+        }
+      },
+      "name": "Policy Compliance for Arc Servers"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 7. Windows Server AHB / Licensing Indicators\r\n\r\nThis section surfaces Windows Server licensing-related properties reported on Arc-enabled machines. Fields may show as blank or not reported if licensing configuration has not been populated."
+      },
+      "name": "text - ahb status"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines'\r\n\r\n| extend\r\n    ComputerName = name,\r\n    OSType = tostring(properties.osType),\r\n    OSName = tostring(properties.osName),\r\n    OSSku = tostring(properties.osSku),\r\n    LicenseStatus = tostring(properties.licenseProfile.licenseStatus),\r\n    LicenseChannel = tostring(properties.licenseProfile.productProfile.licenseChannel),\r\n    ProductSubscriptionStatus = tostring(properties.licenseProfile.productProfile.subscriptionStatus),\r\n    SoftwareAssurance = tostring(properties.licenseProfile.softwareAssurance.softwareAssuranceCustomer),\r\n    EsuLicenseAssignmentState = tostring(properties.licenseProfile.esuProfile.licenseAssignmentState)\r\n\r\n| where OSType =~ 'windows'\r\n    or OSName has 'Windows'\r\n    or OSSku has 'Windows'\r\n\r\n| extend WindowsLicensingHealth = case(\r\n    LicenseStatus =~ 'Licensed', 'Licensed',\r\n    ProductSubscriptionStatus =~ 'Enabled', 'Subscription Enabled',\r\n    SoftwareAssurance =~ 'true', 'Software Assurance Indicated',\r\n    EsuLicenseAssignmentState =~ 'Assigned', 'ESU Assigned',\r\n    isempty(LicenseStatus)\r\n        and isempty(ProductSubscriptionStatus)\r\n        and isempty(SoftwareAssurance)\r\n        and isempty(EsuLicenseAssignmentState),\r\n        'Not Reported',\r\n    'Review Licensing Status'\r\n)\r\n\r\n| extend AHBIcon = case(\r\n    LicenseStatus =~ 'Licensed', 'success',\r\n    ProductSubscriptionStatus =~ 'Enabled', 'success',\r\n    SoftwareAssurance =~ 'true', 'success',\r\n    EsuLicenseAssignmentState =~ 'Assigned', 'success',\r\n\r\n    isempty(LicenseStatus)\r\n        and isempty(ProductSubscriptionStatus)\r\n        and isempty(SoftwareAssurance)\r\n        and isempty(EsuLicenseAssignmentState),\r\n        'warning',\r\n\r\n    'critical'\r\n)\r\n\r\n| project\r\n    AHBIcon,\r\n    ComputerName,\r\n    WindowsLicensingHealth,\r\n    LicenseStatus,\r\n    LicenseChannel,\r\n    ProductSubscriptionStatus,\r\n    SoftwareAssurance,\r\n    EsuLicenseAssignmentState,\r\n    OSName,\r\n    OSSku,\r\n    ResourceGroup = resourceGroup,\r\n    Location = location,\r\n    SubscriptionId = subscriptionId\r\n\r\n| order by WindowsLicensingHealth asc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "AHBIcon",
+              "formatter": 11
+            }
+          ]
+        }
+      },
+      "name": "Windows Server AHB and Licensing Status"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 8. Arc-enabled SQL Server License Status\r\n\r\nThis section checks Arc-enabled SQL Server instances and reported SQL license type. If Arc-enabled SQL Server is not deployed, this section may return no rows."
+      },
+      "name": "text - sql license"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n\r\n| extend\r\n    SqlInstanceName = name,\r\n    SqlVersion = tostring(properties.version),\r\n    SqlEdition = tostring(properties.edition),\r\n    SqlLicenseType = tostring(properties.licenseType),\r\n    SqlStatus = tostring(properties.status)\r\n\r\n| extend SqlLicenseHealth = case(\r\n    SqlLicenseType =~ 'AHUB', 'Azure Hybrid Benefit',\r\n    SqlLicenseType =~ 'PAYG', 'Pay-As-You-Go',\r\n    isempty(SqlLicenseType), 'SQL License Type Not Reported',\r\n    SqlLicenseType\r\n)\r\n\r\n| extend SqlLicenseIcon = case(\r\n    SqlLicenseType =~ 'AHUB', 'success',\r\n    SqlLicenseType =~ 'PAYG', 'success',\r\n    isempty(SqlLicenseType), 'warning',\r\n    'critical'\r\n)\r\n\r\n| project\r\n    SqlLicenseIcon,\r\n    SqlInstanceName,\r\n    SqlLicenseHealth,\r\n    SqlLicenseType,\r\n    SqlEdition,\r\n    SqlVersion,\r\n    SqlStatus,\r\n    ResourceGroup = resourceGroup,\r\n    Location = location,\r\n    SubscriptionId = subscriptionId\r\n\r\n| order by SqlLicenseHealth asc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "SqlLicenseIcon",
+              "formatter": 11
+            }
+          ]
+        }
+      },
+      "name": "Arc-enabled SQL Server License Status"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 9. Governance Scorecard\r\n\r\nThis scorecard intentionally uses only the Arc server resource table to avoid parser issues from complex joins. Defender for Cloud and MDE are shown in their own sections above."
+      },
+      "name": "text - governance scorecard"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.hybridcompute/machines'\r\n| extend\r\n    AutoUpgrade = tostring(properties.agentUpgrade.enableAutomaticUpgrade),\r\n    ArcStatus = tostring(properties.status)\r\n\r\n| summarize\r\n    TotalArcServers = count(),\r\n    Connected = countif(ArcStatus =~ 'Connected'),\r\n    DisconnectedOrUnknown = countif(\r\n        ArcStatus !~ 'Connected' or isempty(ArcStatus)\r\n    ),\r\n    AutoUpgradeEnabled = countif(\r\n        AutoUpgrade =~ 'true'\r\n    ),\r\n    AutoUpgradeDisabledOrUnknown = countif(\r\n        AutoUpgrade !~ 'true' or isempty(AutoUpgrade)\r\n    )\r\n\r\n| extend\r\n    ArcHealthIcon = iff(\r\n        DisconnectedOrUnknown == 0 and TotalArcServers > 0,\r\n        'success',\r\n        'critical'\r\n    )\r\n\r\n| extend\r\n    AutoUpgradeIcon = iff(\r\n        AutoUpgradeDisabledOrUnknown == 0 and TotalArcServers > 0,\r\n        'success',\r\n        'critical'\r\n    )\r\n\r\n| extend\r\n    DefenderIcon = 'warning'\r\n\r\n| extend\r\n    MDEIcon = 'warning'\r\n\r\n| extend\r\n    ArcConnectionScore = iff(\r\n        DisconnectedOrUnknown == 0 and TotalArcServers > 0,\r\n        'Healthy',\r\n        'Attention Required'\r\n    )\r\n\r\n| extend\r\n    AutoUpgradeScore = iff(\r\n        AutoUpgradeDisabledOrUnknown == 0 and TotalArcServers > 0,\r\n        'Compliant',\r\n        'Action Required'\r\n    )\r\n\r\n| extend\r\n    DefenderForCloudScore = 'Not Configured'\r\n\r\n| extend\r\n    MDEScore = 'Not Configured'\r\n\r\n| project\r\n    ArcHealthIcon,\r\n    ArcConnectionScore,\r\n\r\n    AutoUpgradeIcon,\r\n    AutoUpgradeScore,\r\n\r\n    DefenderIcon,\r\n    DefenderForCloudScore,\r\n\r\n    MDEIcon,\r\n    MDEScore,\r\n\r\n    TotalArcServers,\r\n    Connected,\r\n    DisconnectedOrUnknown,\r\n    AutoUpgradeEnabled,\r\n    AutoUpgradeDisabledOrUnknown",
+        "size": 2,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [ "value::all" ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ArcHealthIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "AutoUpgradeIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "DefenderIcon",
+              "formatter": 11
+            },
+            {
+              "columnMatch": "MDEIcon",
+              "formatter": 11
+            }
+          ]
+        }
+      },
+      "name": "Arc Governance Scorecard"
+    }
+  ],
+  "defaultResourceIds": [ "value::all" ],
+  "fallbackResourceIds": [ "value::all" ],
+  "$schema": "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/schema/workbook.json"
+}
+
